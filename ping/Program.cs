@@ -6,6 +6,8 @@ using System.Collections.Generic;
 using CommandLine;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.IO;
+using System.Threading.Tasks;
 
 namespace ping
 {
@@ -21,13 +23,10 @@ namespace ping
         private static ConsoleKeyInfo key;
         private static Boolean ready = false;
         private static string line = null;
-        private static string[] arguments = null;
-
-        private static string nameOrAddress = null;
-        private static int counter = 0;
-        private static int timeout = 0;
-        private static int repetitionTime = 0;
-
+        private static string text = null;
+        private static StreamWriter outputFile = null;
+        private static FileStream fs = null;
+        private static DateTime time;
 
         private static decimal sentCounter = 0;
         private static decimal receivedCounter = 0;
@@ -37,123 +36,239 @@ namespace ping
         private static decimal maxTime = 0;
         private static decimal avgTime = 0;
 
+        private static string NameOrAddress;
+        private static int Counter;
+        private static bool NoStop;
+        private static int Timeout;
+        private static int RepetitionTime;
+        private static bool SaveData;
+        private static ConsoleColor SuccessColor = ConsoleColor.White;
+        private static ConsoleColor FailedColor = ConsoleColor.White;
+        private static bool Mute = false;
+        private static string DefaultOutputFileName = null;
+        private static string OutputFileName = null;
+
         private static SystemSound errorSound = SystemSounds.Hand;
 
+        private interface ICommand
+        {
+            void Execute();
+        }
+
+        [Verb ("ping")]
+        public class PingCommand : ICommand
+        {
+            [Value(0, Required = true, HelpText = "Name or IP address.")]
+            public string NameOrAddress { get; set; }
+
+            [Option('n', "counter", Default = 4, HelpText = "Number of echo requests to send.")]
+            public int Counter { get; set; }
+            
+            [Option('t', HelpText = "Ping the specified host until stopped. To stop and see statistics - type Enter.")]
+            public bool NoStop { get; set; }
+
+            [Option('w', "timeout", Default = 1000, HelpText = "Timeout in milliseconds to wait for each reply.")]
+            public int Timeout { get; set; }
+
+            [Option('r', "repetition", Default = 1000, HelpText = "Repetition time in milliseconds to wait for between request to send.")]
+            public int RepetitionTime { get; set; }
+
+            [Option("file", HelpText = "Save data.")]
+            public bool SaveData { get; set; }
+
+            [Value(1, Default = "ping_'yyyy'.'MM'.'dd'_'HH'.'mm'.'ss'.txt", HelpText = "Output file name.")]
+            public string OutputFileName { get; set; }
+
+            public void Execute()
+            {
+                Program.NameOrAddress = this.NameOrAddress;
+                Program.Counter = this.Counter;
+                Program.NoStop = this.NoStop;
+                Program.Timeout = this.Timeout;
+                Program.RepetitionTime = this.RepetitionTime;
+                Program.SaveData = this.SaveData;
+
+                if (SaveData)
+                {
+                    if (Program.DefaultOutputFileName == null)
+                    { 
+                        Program.OutputFileName = GetOutputFileName(this.OutputFileName);
+                    }
+                    else
+                    {
+                        Program.OutputFileName = Program.DefaultOutputFileName;
+                    }
+                }
+
+                Ping();
+            }
+        }
+
+        [Verb("sound")]
+        public class SoundCommand : ICommand
+        {
+            [Option("mute", HelpText = "Mute failure sound.")]
+            public bool Mute { get; set; }
+
+            public void Execute()
+            {
+                Program.Mute = this.Mute;
+            }
+        }
+
+        [Verb("color", HelpText = "Foreground color")]
+        public class ColorCommand : ICommand
+        {
+            [Option("success", Default = ConsoleColor.White, HelpText = "Values: Black, DarkBlue, DarkGreen, DarkCyan, DarkRed, DarkMagenta, DarkYellow, Gray, DarkGray, Blue, Green, Cyan, Red, Magenta, Yellow, White")]
+            public ConsoleColor SuccessColor { get; set; }
+
+            [Option("failed", Default = ConsoleColor.White, HelpText = "Values: Black, DarkBlue, DarkGreen, DarkCyan, DarkRed, DarkMagenta, DarkYellow, Gray, DarkGray, Blue, Green, Cyan, Red, Magenta, Yellow, White")]
+            public ConsoleColor FailedColor { get; set; }
+
+            public void Execute()
+            {
+                Program.SuccessColor = this.SuccessColor;
+                Program.FailedColor = this.FailedColor;
+            }
+        }
+
+        [Verb("file")]
+        public class FileCommand : ICommand
+        {
+            [Value(0, HelpText = "Output file path.")]
+            public string OutputFileName { get; set; }
+
+            public void Execute()
+            {
+                Program.DefaultOutputFileName = GetOutputFileName(this.OutputFileName);
+            }
+        }
 
         static void Main(string[] args)
         {
 
             Console.WriteLine("Copyright (c) 2021 MidnightProject" + "\n" + "\n");
 
+            try
+            {
+                string[] lines = File.ReadAllLines("default.txt");
+
+                foreach (string line in lines)
+                {
+                    if (!line.StartsWith("#"))
+                    {
+                        args = line.Split(' ').ToArray();
+                        ready = false;
+
+                        Parser.Default.ParseArguments<PingCommand, SoundCommand, ColorCommand, FileCommand>(args).WithParsed<ICommand>(t => t.Execute()); 
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+               
+            }
+
             do
             {
-                sentCounter = 0;
-                receivedCounter = 0;
-                lostCounter = 0;
+                line = Console.ReadLine().TrimEnd();
+                args = line.Split(' ').ToArray();
 
-                minTime = 0;
-                maxTime = 0;
-                avgTime = 0;
+                Parser.Default.ParseArguments<PingCommand, SoundCommand, ColorCommand, FileCommand>(args).WithParsed<ICommand>(t => t.Execute());
+            } while (true);
+        }
 
-                counter = 0;
+        private static void Ping()
+        {
+            Console.Clear();
 
-                do
+            sentCounter = 0;
+            receivedCounter = 0;
+            lostCounter = 0;
+
+            minTime = 0;
+            maxTime = 0;
+            avgTime = 0;
+
+            if (SaveData)
+            {
+                fs = new FileStream(@OutputFileName, FileMode.OpenOrCreate);
+                outputFile = new StreamWriter(fs);
+
+                outputFile.WriteLine("Copyright (c) 2021 MidnightProject");
+                outputFile.WriteLine(String.Empty);
+            }
+            
+            repetitionsTimer = new Timer(TimerCallback, null, 0, RepetitionTime);
+
+            do
+            {
+                key = Console.ReadKey();
+
+                if ((key.Modifiers & ConsoleModifiers.Control) != 0 && key.Key == ConsoleKey.X)
                 {
-                    line = Console.ReadLine();
-
-                    if (!string.IsNullOrEmpty(line) && !string.IsNullOrWhiteSpace(line))
-                    {
-                        List<string> list = line.Split(' ').ToList();
-
-                        for (int i = 0; i < list.Count; i++)
-                        {
-                            if (list[i] == "-t")
-                            {
-                                list.Remove("-t");
-
-                                counter = -1;
-                            }
-                        }
-
-                        arguments = list.ToArray();
-
-                        CommandLine.Parser.Default.ParseArguments<Options>(arguments).WithParsed<Options>(o =>
-                        {
-                            if (!string.IsNullOrEmpty(o.NameOrAddress))
-                            {
-                                nameOrAddress = o.NameOrAddress;
-
-                                if (counter == 0)
-                                {
-                                    if (o.Counter > 0)
-                                    {
-                                        counter = o.Counter;
-                                    }
-
-                                    timeout = o.Timeout;
-                                    repetitionTime = o.RepetitionTime;
-                                }
-
-                                ready = true;
-                            }
-                        })
-                        .WithNotParsed<Options>(e =>
-                        {
-                            ready = false;
-                        });
-                    }
-                    else
-                    {
-                        ready = false;
-                    }
-
-                } while (!ready);
-                
-
-                Console.Clear();
-
-                repetitionsTimer = new Timer(TimerCallback, null, 0, repetitionTime);
-
-                do
-                {
-                    key = Console.ReadKey();
-
-                    if ((key.Modifiers & ConsoleModifiers.Control) != 0 && key.Key == ConsoleKey.X)
-                    {
-                        Environment.Exit(0);
-                    }
-
-                    if (key.Key == ConsoleKey.Enter)
-                    {
-                        break;
-                    }
-
-                } while (true);
-
-                repetitionsTimer.Change(Timeout.Infinite, Timeout.Infinite);
-                repetitionsTimer = null;
-
-                while (!ready)
-                {
-                    ;
+                    Environment.Exit(0);
                 }
 
-                Console.WriteLine("\n");
-                Console.WriteLine("Packets: Sent = " + sentCounter + "; Received = " + receivedCounter + "; Lost = " + lostCounter + " (" + Decimal.Round(lostCounter / sentCounter * 100) + "% loss)");
-                if (receivedCounter != 0)
+                if (key.Key == ConsoleKey.Enter)
                 {
-                    Console.WriteLine("Times [ms]: Minimum = " + minTime + "; Maximum = " + maxTime + "; Average = " + Decimal.Round(avgTime / sentCounter));
+                    break;
                 }
-                Console.WriteLine("\n");
 
             } while (true);
+
+            repetitionsTimer.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+            repetitionsTimer = null;
+
+            while (!ready)
+            {
+                ;
+            }
+
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.WriteLine("\n");
+            Console.WriteLine("Packets: Sent = " + sentCounter + "; Received = " + receivedCounter + "; Lost = " + lostCounter + " (" + Decimal.Round(lostCounter / sentCounter * 100) + "% loss)");
+            if (receivedCounter != 0)
+            {
+                Console.WriteLine("Times [ms]: Minimum = " + minTime + "; Maximum = " + maxTime + "; Average = " + Decimal.Round(avgTime / sentCounter));
+            }
+            Console.WriteLine("\n");
+
+            if (SaveData)
+            {
+                outputFile.WriteLine(String.Empty);
+                outputFile.WriteLine("Packets: Sent = " + sentCounter + "; Received = " + receivedCounter + "; Lost = " + lostCounter + " (" + Decimal.Round(lostCounter / sentCounter * 100) + "% loss)");
+                if (receivedCounter != 0)
+                {
+                    outputFile.WriteLine("Times [ms]: Minimum = " + minTime + "; Maximum = " + maxTime + "; Average = " + Decimal.Round(avgTime / sentCounter));
+                }
+
+                outputFile.Flush();
+                outputFile.Close();
+                fs.Close();
+            } 
+        }
+
+        private static string GetOutputFileName(string name)
+        {
+            name = name.Replace("'yyyy'", DateTime.Now.ToString("yyyy"));
+            name = name.Replace("'yy'", DateTime.Now.ToString("yy"));
+            name = name.Replace("'MM'", DateTime.Now.ToString("MM"));
+            name = name.Replace("'MMMM'", DateTime.Now.ToString("MMMM"));
+            name = name.Replace("'dd'", DateTime.Now.ToString("dd"));
+            name = name.Replace("'dddd'", DateTime.Now.ToString("dddd"));
+            name = name.Replace("'HH'", DateTime.Now.ToString("HH"));
+            name = name.Replace("'mm'", DateTime.Now.ToString("mm"));
+            name = name.Replace("'ss'", DateTime.Now.ToString("ss"));
+
+            return name;
         }
 
         private static void TimerCallback(Object o)
         {
-            repetitionsTimer.Change(Timeout.Infinite, Timeout.Infinite);
+            repetitionsTimer.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
 
-            if (counter == 0)
+            if (Counter == 0)
             {
                 ThreadPool.QueueUserWorkItem((q) =>
                 {
@@ -164,15 +279,59 @@ namespace ping
                 return;
             }
 
-            if (counter > 0)
+            if (!NoStop)
             {
-                counter--;
+                if (Counter > 0)
+                {
+                    Counter--;
+                }
             }
 
-            PingHost(nameOrAddress, timeout);
+            PingHostAsync(NameOrAddress, Timeout);
         }
 
-        private static void PingHost(string nameOrAddress, int timeout)
+        /* ---------------------------------------------------------------------------------------------------------- */
+        /* Author: Alexandru Clonțea */
+        /* Link: https://stackoverflow.com/questions/49069381/why-ping-timeout-is-not-working-correctly               */
+        /* ---------------------------------------------------------------------------------------------------------- */
+        private static PingReply PingOrTimeout(string hostname, int timeOut)
+        {
+            PingReply result = null;
+            var cancellationTokenSource = new CancellationTokenSource();
+            var timeoutTask = Task.Delay(timeOut, cancellationTokenSource.Token);
+
+            var actionTask = Task.Factory.StartNew(() =>
+            {
+                result = NormalPing(hostname, timeOut);
+            }, cancellationTokenSource.Token);
+
+            Task.WhenAny(actionTask, timeoutTask).ContinueWith(t =>
+            {
+                cancellationTokenSource.Cancel();
+            }).Wait();
+
+            return result;
+        }
+
+        /* ---------------------------------------------------------------------------------------------------------- */
+        /* Ping.Send Method                                                                                           */
+        /* Timeout                                                                                                    */
+        /* When specifying very small numbers for timeout,                                                            */
+        /* the Ping reply can be received even if timeout milliseconds have elapsed.                                  */
+        /* ---------------------------------------------------------------------------------------------------------- */
+        private static PingReply NormalPing(string hostname, int timeout)                           
+        {
+            try
+            {
+                return new Ping().Send(hostname, timeout);
+            }
+            catch (Exception e)
+            {
+                return null;
+            }
+        }
+
+        private static void PingHostAsync(string nameOrAddress, int timeout)
         {
             if (repetitionsTimer == null)
             {
@@ -186,12 +345,21 @@ namespace ping
             Ping ping = null;
             PingReply reply = null;
 
+            time = DateTime.Now;
+
             try
             {
                 ping = new Ping();
-                reply = ping.Send(nameOrAddress, timeout);
+                reply = PingOrTimeout(nameOrAddress, timeout);
 
-                if (reply.Status == IPStatus.Success)
+                if (reply == null)
+                {
+                    Console.ForegroundColor = FailedColor;
+                    text = "Ping to " + nameOrAddress + ": TimedOut";
+
+                    ErrorSound();
+                }
+                else if (reply.Status == IPStatus.Success)
                 {
                     receivedCounter++;
 
@@ -215,26 +383,40 @@ namespace ping
 
                     avgTime += reply.RoundtripTime;
 
-                    Console.WriteLine("Ping to " + nameOrAddress + " [" + reply.Address.ToString() + "]: " + reply.Status.ToString() + "; " + "time = " + reply.RoundtripTime.ToString() + " ms");
+                    Console.ForegroundColor = SuccessColor;
+                    text = "Ping to " + nameOrAddress + " [" + reply.Address.ToString() + "]: " + reply.Status.ToString() + "; " + "time = " + reply.RoundtripTime.ToString() + " ms";
                 }
                 else
                 {
-                    Console.WriteLine("Ping to " + nameOrAddress + ": " + reply.Status.ToString());
+                    Console.ForegroundColor = FailedColor;
+                    text = "Ping to " + nameOrAddress + ": " + reply.Status.ToString();
 
-                    errorSound.Play();
+                    ErrorSound();
                 }
             }
             catch (PingException e)
             {
-                Console.WriteLine(e.InnerException.Message);
+                Console.ForegroundColor = FailedColor;
+                text = e.InnerException.Message;
 
-                errorSound.Play();
+                ErrorSound();
             }
             finally
             {
-                if (ping != null)
+                try
                 {
                     ping.Dispose();
+                }
+                catch
+                {
+
+                }
+
+                Console.WriteLine(text);
+
+                if (SaveData)
+                {
+                    outputFile.WriteLine(time.ToString("yyyy.MM.dd_HH:mm:ss.fff") + "   " + text);
                 }
             }
 
@@ -242,28 +424,23 @@ namespace ping
 
             if (repetitionsTimer != null)
             {
-                repetitionsTimer.Change(repetitionTime, repetitionTime);
+                repetitionsTimer.Change(RepetitionTime, RepetitionTime);
             }
 
             ready = true;
         }
-    }
 
-    public class Options
-    {
-        [Value(0, HelpText = "Name or IP address.")]
-        public string NameOrAddress { get; set; }
-
-        [Option('n', "counter", Default = 4, HelpText = "Number of echo requests to send. Minimum value is 1.")]
-        public int Counter { get; set; }
-
-        [Option('t', HelpText = "Ping the specified host until stopped. To stop and see statistics - type Enter.")]
-        public bool t { get; set; }
-
-        [Option('w', "timeout", Default = 1000, HelpText = "Timeout in milliseconds to wait for each reply.")]
-        public int Timeout { get; set; }
-
-        [Option('r', "repetition", Default = 1000, HelpText = "Repetition time in milliseconds to wait for between request to send.")]
-        public int RepetitionTime { get; set; }
+        private static void ErrorSound()
+        {
+            if (!Mute)
+            {
+                errorSound.Play();
+            }
+        }
     }
 }
+ 
+ 
+ 
+ 
+ 
