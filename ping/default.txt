@@ -3,7 +3,5 @@
 #color --success Black --failed Red
 sound --mute
 #file ping_'yyyy'.'MM'.'dd'_'HH'.'mm'.'ss'.txt
-#ping google.com -t --file -w 10 -r 10
 #ping 192.167.4.5 -t --file -w 200 -r 10
-ping 192.167.4.5 --file -w 100 -n 20 -r 100
-#ping google.com -n 20 --file -w 100 -r 100
+ping google.com -n 20 --file -w 20 -r 100
