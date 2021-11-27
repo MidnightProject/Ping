@@ -73,7 +73,7 @@ namespace ping
             [Option('r', "repetition", Default = 1000, HelpText = "Repetition time in milliseconds to wait for between request to send.")]
             public int RepetitionTime { get; set; }
 
-            [Option("file", HelpText = "Save data.")]
+            [Option('f', "file", HelpText = "Save data to file.")]
             public bool SaveData { get; set; }
 
             [Value(1, Default = "ping_'yyyy'.'MM'.'dd'_'HH'.'mm'.'ss'.txt", HelpText = "Output file name.")]
