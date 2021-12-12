@@ -8,6 +8,9 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.IO;
 using System.Threading.Tasks;
+using System.Net;
+using System.Net.Sockets;
+using System.Text.RegularExpressions;
 
 namespace ping
 {
@@ -73,7 +76,7 @@ namespace ping
             [Option('r', "repetition", Default = 1000, HelpText = "Repetition time in milliseconds to wait for between request to send.")]
             public int RepetitionTime { get; set; }
 
-            [Option('f', "file", HelpText = "Save data to file.")]
+            [Option('f', "file", HelpText = "Save data to output file.")]
             public bool SaveData { get; set; }
 
             [Value(1, Default = "ping_'yyyy'.'MM'.'dd'_'HH'.'mm'.'ss'.txt", HelpText = "Output file name.")]
@@ -113,6 +116,116 @@ namespace ping
             public void Execute()
             {
                 Program.Mute = this.Mute;
+            }
+        }
+
+        [Verb("ipconfig")]
+        public class IpconfigCommand : ICommand
+        {
+            [Option('a', "all", HelpText = "Display IP address, subnet mask and default gateway for each adapter bound to TCP/IP")]
+            public bool All { get; set; }
+
+            public void Execute()
+            {
+                Console.Clear();
+                
+                foreach (NetworkInterface networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (networkInterface.Supports(NetworkInterfaceComponent.IPv4) == false)
+                    {
+                        if (this.All)
+                        {
+                            continue;
+                        }
+                    }
+
+                    if (networkInterface.OperationalStatus != OperationalStatus.Up)
+                    {
+                        if (!this.All)
+                        {
+                            continue;
+                        }
+                    }
+
+                    if (networkInterface.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 || networkInterface.NetworkInterfaceType == NetworkInterfaceType.Ethernet)
+                    {
+                        Console.WriteLine(networkInterface.Name);
+
+                        if (this.All)
+                        {
+                            Console.WriteLine(networkInterface.Description);
+                        }
+                        
+                        //Console.WriteLine(String.Empty.PadLeft(networkInterface.Description.Length, '='));
+                        Console.WriteLine();
+
+                        if (this.All)
+                        {
+                            Console.WriteLine("  Interface type ........ : {0}", networkInterface.NetworkInterfaceType);
+                            Console.WriteLine("  Status ................ : {0}", networkInterface.OperationalStatus);
+
+                            string  mac = networkInterface.GetPhysicalAddress().ToString(), 
+                                    regex = "(.{2})(.{2})(.{2})(.{2})(.{2})(.{2})", 
+                                    replace = "$1:$2:$3:$4:$5:$6";
+                            Console.WriteLine("  Physical Address ...... : {0}", Regex.Replace(mac, regex, replace));
+
+                            string versions = String.Empty;
+                            if (networkInterface.Supports(NetworkInterfaceComponent.IPv4))
+                            {
+                                versions = "IPv4";
+                            }
+                            if (networkInterface.Supports(NetworkInterfaceComponent.IPv6))
+                            {
+                                if (!string.IsNullOrEmpty(versions))
+                                {
+                                    versions += " ";
+                                }
+
+                                versions += "IPv6";
+                            }
+                            Console.WriteLine("  IP version ............ : {0}", versions);
+                        }
+
+                        IPInterfaceProperties adapterProperties = networkInterface.GetIPProperties();
+                        IPv4InterfaceProperties IPv4Properties = adapterProperties.GetIPv4Properties();
+
+                        if (IPv4Properties == null)
+                        {
+                            Console.WriteLine("No IPv4 information is available for this interface.");
+                            Console.WriteLine();
+                            continue;
+                        }
+
+                        Console.WriteLine("  DHCP Enabled .......... : {0}", IPv4Properties.IsDhcpEnabled);
+
+                        foreach (UnicastIPAddressInformation ip in networkInterface.GetIPProperties().UnicastAddresses)
+                        {
+                            if (ip.Address.AddressFamily == AddressFamily.InterNetwork)
+                            {
+                                Console.WriteLine("  IPv4 Address .......... : {0}", ip.Address.ToString());
+                                Console.WriteLine("  Subnet Mask ........... : {0}", ip.IPv4Mask.ToString());
+                            }
+                        }
+
+                        foreach (GatewayIPAddressInformation gateway in networkInterface.GetIPProperties().GatewayAddresses)
+                        {
+                            Console.WriteLine("  Gateway Address ....... : {0}",gateway.Address.ToString());
+                        }
+
+                        if (this.All)
+                        {
+                            foreach (IPAddress dns in adapterProperties.DnsAddresses)
+                            {
+                                if (dns.AddressFamily == AddressFamily.InterNetwork)
+                                {
+                                    Console.WriteLine("  DNS Servers ........... : {0}", dns.ToString());
+                                }
+                            }
+                        }
+                    }
+
+                    Console.WriteLine();
+                }
             }
         }
 
@@ -160,7 +273,7 @@ namespace ping
                         args = line.Split(' ').ToArray();
                         ready = false;
 
-                        Parser.Default.ParseArguments<PingCommand, SoundCommand, ColorCommand, FileCommand>(args).WithParsed<ICommand>(t => t.Execute()); 
+                        Parser.Default.ParseArguments<PingCommand, SoundCommand, ColorCommand, FileCommand, IpconfigCommand>(args).WithParsed<ICommand>(t => t.Execute()); 
                     }
                 }
             }
@@ -174,7 +287,7 @@ namespace ping
                 line = Console.ReadLine().TrimEnd();
                 args = line.Split(' ').ToArray();
 
-                Parser.Default.ParseArguments<PingCommand, SoundCommand, ColorCommand, FileCommand>(args).WithParsed<ICommand>(t => t.Execute());
+                Parser.Default.ParseArguments<PingCommand, SoundCommand, ColorCommand, FileCommand, IpconfigCommand>(args).WithParsed<ICommand>(t => t.Execute());
             } while (true);
         }
 

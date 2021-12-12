@@ -4,4 +4,4 @@
 sound --mute
 #file ping_'yyyy'.'MM'.'dd'_'HH'.'mm'.'ss'.txt
 #ping 192.167.4.5 -t --file -w 200 -r 10
-ping google.com -n 20 --file -w 20 -r 100
+#ping google.com -n 20 --file -w 20 -r 100
